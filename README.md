@@ -44,3 +44,34 @@ Merge duplicate recordings: review UI, auto-match, background submit
 
 [Bandcamp Player Enhanced](./userscripts/bandcamp_player_enhanced/README.md)<img src="./userscripts/bandcamp_player_enhanced/icon.svg" align="left" width="32"><br>
 Bandcamp album player with keyboard shortcuts
+
+## Browser-independent CLI
+
+This fork also contains `mbtool`, a read-only Node.js CLI built on a browser-independent MusicBrainz client and normalized core models. The original userscripts remain available and their browser-bound behavior is preserved.
+
+### Install and build
+
+```bash
+npm install
+npm run build
+npm test
+npm link
+```
+
+### Usage
+
+```bash
+mbtool --help
+mbtool --version
+mbtool release <MBID-or-MusicBrainz-URL>
+mbtool inspect <MBID> --json | jq .
+mbtool isrc <MBID> --verbose
+mbtool credits <MBID> --provider qobuz
+mbtool credits <MBID> --missing --json
+mbtool platforms <MBID> --json
+mbtool config show
+```
+
+The CLI accepts raw release MBIDs and MusicBrainz release URLs. Normal output goes to stdout and diagnostics go to stderr. `--no-cache` disables the filesystem cache for a command. Configuration is read from `~/.config/mbtool/config.json` (or `$XDG_CONFIG_HOME/mbtool/config.json`); `MBTOOL_USER_AGENT` and `MBTOOL_DISCOGS_TOKEN` are supported environment overrides. v0.1 never edits MusicBrainz.
+
+Exit codes are 0 success, 1 generic error, 2 invalid input, 3 network error, 4 provider error, and 5 MusicBrainz error. See [CLI architecture](docs/cli-architecture.md) and [roadmap](CLI_ROADMAP.md).
