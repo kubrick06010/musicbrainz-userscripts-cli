@@ -1,5 +1,5 @@
 import { normalizeArtist, normalizeDuration, normalizeTitle } from './normalization.js';
-import type { ProviderMatch, Track } from './models.js';
+import type { ProviderMatch, ProviderReleaseCandidate, Release, Track } from './models.js';
 export function scoreCandidate(track: Track, candidate: ProviderMatch): number {
   let score = 0; let weight = 0;
   if (candidate.title) { weight += 0.45; if (normalizeTitle(track.title) === normalizeTitle(candidate.title)) score += 0.45; else if (normalizeTitle(track.title).includes(normalizeTitle(candidate.title)) || normalizeTitle(candidate.title).includes(normalizeTitle(track.title))) score += 0.25; }
@@ -10,3 +10,10 @@ export function scoreCandidate(track: Track, candidate: ProviderMatch): number {
 }
 export function classifyConfidence(score: number): ProviderMatch['decision'] { return score >= .95 ? 'EXACT' : score >= .8 ? 'HIGH' : score >= .6 ? 'LIKELY' : score >= .4 ? 'REVIEW' : 'REJECT'; }
 export function compareTrack(track: Track, candidate: ProviderMatch): ProviderMatch { const confidence = scoreCandidate(track, candidate); return { ...candidate, confidence, decision: classifyConfidence(confidence) }; }
+export function scoreRelease(release: Release, candidate: ProviderReleaseCandidate): { score: number; evidence: string[] } {
+  const evidence: string[] = []; let score = 0;
+  if (normalizeTitle(release.title) === normalizeTitle(candidate.title)) { score += 0.5; evidence.push('release title exact'); } else if (normalizeTitle(release.title).includes(normalizeTitle(candidate.title)) || normalizeTitle(candidate.title).includes(normalizeTitle(release.title))) { score += 0.28; evidence.push('release title partial'); }
+  const expectedArtists = release.artistCredit.map(a => normalizeArtist(a.name)); if (candidate.artist && expectedArtists.some(a => a === normalizeArtist(candidate.artist!))) { score += 0.25; evidence.push('artist exact'); }
+  const count = release.mediums.reduce((n, m) => n + m.tracks.length, 0); if (candidate.trackCount != null && candidate.trackCount === count) { score += 0.25; evidence.push('track count exact'); } else if (candidate.trackCount != null && Math.abs(candidate.trackCount - count) <= 1) { score += 0.1; evidence.push('track count near'); }
+  return { score: Math.min(1, score), evidence };
+}

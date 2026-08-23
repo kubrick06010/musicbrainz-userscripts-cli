@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import discogsFixture from './fixtures/discogs-release.json' with { type: 'json' };
+import tidalFixture from './fixtures/tidal-credits.json' with { type: 'json' };
+import deezerFixture from './fixtures/deezer-track.json' with { type: 'json' };
+import { parseDiscogsRelease } from '../dist/providers/discogs.js';
+import { parseQobuzApiTracks, parseQobuzAlbumUrl, parseQobuzHtml } from '../dist/providers/qobuz.js';
+import { parseTidalAlbumUrl } from '../dist/providers/tidal.js';
+import { resolveTidal } from '../dist/providers/tidal.js';
+import { qobuzIsrcs } from '../dist/providers/qobuz.js';
+import { parseDiscogsUrl } from '../dist/providers/discogs.js';
+import { parseTidalCredits } from '../dist/providers/tidal.js';
+import { parseDeezerAlbum } from '../dist/providers/deezer.js';
+import { classifyIsrcEvidence } from '../dist/providers/index.js';
+import { classifyConfidence, scoreRelease } from '../dist/core/matching.js';
+
+test('Discogs parser extracts track and release credits', () => { const result = parseDiscogsRelease(discogsFixture); assert.equal(result.tracks[0].title, 'Café Noir'); assert.deepEqual(result.credits.map(c => c.name), ['Jane Doe', 'Alex Mix']); assert.equal(result.credits[0].role, 'producer'); });
+test('Qobuz parser extracts server-rendered credits and duration', () => { const result = parseQobuzHtml(fs.readFileSync(new URL('./fixtures/qobuz-album.html', import.meta.url), 'utf8'), 'https://www.qobuz.com/us-en/album/x/example'); assert.equal(result.tracks.length, 1); assert.equal(result.credits[0].name, 'Jane Doe'); assert.equal(result.credits[0].role, 'producer'); assert.equal(result.tracks[0].durationMs, 195000); });
+test('provider URL resolvers accept upstream URL variants', () => { assert.equal(parseQobuzAlbumUrl('//open.qobuz.com/album/example/vft3hpnx5c3lc').id, 'vft3hpnx5c3lc'); assert.equal(parseTidalAlbumUrl('https://tidal.com/browse/album/427731309').id, '427731309'); assert.equal(parseDiscogsUrl('https://www.discogs.com/master/3886660').type, 'master'); });
+test('Qobuz API parser extracts authenticated ISRC metadata', () => { const payload = JSON.parse(fs.readFileSync(new URL('../userscripts/isrc_scout/test/fixture-418-albumget.json', import.meta.url), 'utf8')); const tracks = parseQobuzApiTracks(payload, 'https://www.qobuz.com/us-en/album/x/w2kkkim3azhaa'); assert.equal(tracks.length, 13); assert.equal(tracks[0].isrcs[0], 'TCABK1210438'); });
+test('Tidal parser extracts contributors and ISRC-shaped track data', () => { const result = parseTidalCredits(tidalFixture, 'https://tidal.com/album/1'); assert.equal(result.tracks[0].isrcs[0], 'USABC1234567'); assert.equal(result.credits[0].name, 'Jane Doe'); assert.equal(result.credits[0].role, 'producer'); });
+test('Deezer parser extracts track ISRCs from detailed track payloads', () => { const result = parseDeezerAlbum({ id: 1, title: 'Example Release', artist: { name: 'The Example' }, nb_tracks: 1, tracks: { data: [deezerFixture] } }); assert.equal(result.tracks[0].isrcs[0], 'USABC1234567'); });
+test('release matching exposes evidence and rejects unrelated candidates', () => { const release = { title: 'Example Release', artistCredit: [{ name: 'The Example' }], mediums: [{ position: 1, tracks: [{ id: '1', title: 'Café Noir', number: 1, position: '1', medium: 1, artists: [], isrcs: [], credits: [], relationships: [] }] }], relationships: [], links: [] }; const good = scoreRelease(release, { provider: 'fixture', id: '1', url: 'https://example.test/1', title: 'Example Release', artist: 'The Example', trackCount: 1 }); const bad = scoreRelease(release, { provider: 'fixture', id: '2', url: 'https://example.test/2', title: 'Other', artist: 'Other', trackCount: 10 }); assert.equal(classifyConfidence(good.score), 'EXACT'); assert.ok(bad.score < good.score); assert.ok(good.evidence.length >= 3); });
+test('ISRC evidence reports independent agreement and conflict', () => { const agree = classifyIsrcEvidence([], [{ isrc: 'USABC1234567' }, { isrc: 'USABC1234567' }]); assert.equal(agree.status, 'MATCH'); assert.equal(agree.agreement, 2); const conflict = classifyIsrcEvidence([], [{ isrc: 'USABC1234567' }, { isrc: 'GBXYZ1234567' }]); assert.equal(conflict.status, 'CONFLICT'); });
+test('malformed provider payloads fail closed', () => { const qobuz = parseQobuzHtml('<html></html>', 'https://qobuz.com/album/x/nope'); assert.equal(qobuz.tracks.length, 0); const tidal = parseTidalCredits({ unexpected: true }, 'https://tidal.com/album/1'); assert.equal(tidal.credits.length, 0); });
+test('credential-gated providers return structured auth diagnostics', async () => { const oldToken = process.env.MBTOOL_TIDAL_ACCESS_TOKEN; const oldId = process.env.MBTOOL_TIDAL_CLIENT_ID; const oldSecret = process.env.MBTOOL_TIDAL_CLIENT_SECRET; delete process.env.MBTOOL_TIDAL_ACCESS_TOKEN; delete process.env.MBTOOL_TIDAL_CLIENT_ID; delete process.env.MBTOOL_TIDAL_CLIENT_SECRET; const release = { title: 'Example', artistCredit: [], mediums: [], relationships: [], links: [] }; const tidal = await resolveTidal(release, {}); const qobuz = await qobuzIsrcs('example', {}); assert.equal(tidal.diagnostics[0].status, 'AUTH_REQUIRED'); assert.equal(qobuz.diagnostic.status, 'AUTH_REQUIRED'); if (oldToken) process.env.MBTOOL_TIDAL_ACCESS_TOKEN = oldToken; if (oldId) process.env.MBTOOL_TIDAL_CLIENT_ID = oldId; if (oldSecret) process.env.MBTOOL_TIDAL_CLIENT_SECRET = oldSecret; });
