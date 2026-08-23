@@ -1,6 +1,6 @@
 # Luna MusicBrainz CLI Port Status
 
-Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocked
+Status values are not started, in progress, complete, or blocked.
 
 ## Bootstrap and analysis
 
@@ -43,4 +43,4 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [x] Update README without erasing upstream documentation
 - [x] Create `CLI_PORT_REPORT.md`
 - [x] Preserve GPL-3.0 notices and review git history/status
-- [x] Completion gate: no `[ ]` or `[~]` entries remain
+- [x] Completion gate: no unfinished entries remain
