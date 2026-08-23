@@ -63,5 +63,5 @@ Status values are not started, in progress, complete, or blocked.
 - [x] Real regression comparison
 - [x] Multi-release live smoke matrix
 - [x] Documentation accuracy audit
-- [ ] Clean build/test validation
-- [ ] Final functional completion audit
+- [x] Clean build/test validation
+- [x] Final functional completion audit

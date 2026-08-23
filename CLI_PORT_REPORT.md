@@ -58,7 +58,7 @@ Remaining limitations are provider-side: Qobuz ISRC API and Tidal catalog/credit
 
 ## Commits
 
-The work is on branch `feat/cli-port`. The repository history remains upstream history plus three focused commits: `c31de726 feat(cli): add browser-independent MusicBrainz CLI`, `b052f0e5 docs(cli): document architecture and validation`, and `b39b0bbd chore: close CLI port completion ledger`. No upstream files were mass-moved or cosmetically reformatted.
+The work is on branch `feat/cli-port`. The repository history remains upstream history plus focused commits: `c31de726 feat(cli): add browser-independent MusicBrainz CLI`, `b052f0e5 docs(cli): document architecture and validation`, `b39b0bbd chore: close CLI port completion ledger`, `77021ab8 feat(providers): add external credit ISRC and platform discovery`, and `007eb6c3 docs: record functional provider completion evidence`. No upstream files were mass-moved or cosmetically reformatted.
 
 ## Clean-checkout validation
 
