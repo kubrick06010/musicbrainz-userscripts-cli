@@ -20,6 +20,10 @@ dev/notif-channel/node_modules/
 /package.json
 /pnpm-lock.yaml
 
+# CLI build output and workstation metadata.
+/dist/
+/.DS_Store
+
 # Per-developer MCP config. Each contributor copies
 # `dev/notif-channel/mcp.json.template` → `.mcp.json` themselves
 # (see DEVELOP.md). The template is tracked; the live config isn't.
