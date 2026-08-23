@@ -22,11 +22,11 @@ The userscript UI, DOM selectors, page-context globals, GM storage/request adapt
 
 ## Supported providers
 
-Existing MusicBrainz URL relationships are normalized for Discogs, Qobuz, Tidal, Deezer, Spotify, Bandcamp, Apple, Beatport, and SoundCloud. Deezer's public album endpoint is used for optional ISRC candidates when a Deezer album relationship is present. Other provider availability is conservative and reported as `UNVERIFIED` when no relationship or configured provider search is available; no provider failure is hidden as a match.
+Existing MusicBrainz URL relationships are normalized for the upstream provider vocabulary, while the functional external adapters in this pass are Discogs, Qobuz, Tidal, and Deezer. Deezer's public album and track endpoints provide real ISRC candidates; Qobuz store pages provide credits; Discogs API provides credits/platform metadata; Qobuz ISRC and Tidal catalog/credits paths are credential-gated. Other upstream providers remain outside the functional completion scope.
 
 ## Tests and executed validation
 
-`npm install`, `npm run build`, `npm test`, `npm link`, `mbtool --help`, and `mbtool --version` all exited successfully. The test suite has 7 passing tests covering Unicode/punctuation normalization, ISRC validation, duration handling, confidence thresholds, help/version, invalid input, and masked configuration. Live commands were executed against release `aa6c4473-3528-41c2-b55b-d9e18bdba4ff` (The Exciting Sounds of Menahan Street Band): release, inspect, isrc, credits, platforms, all three requested provider filters, URL-form release, JSON output, and `jq` parse checks.
+`npm ci`, `npm run typecheck`, `npm run build`, `npm test`, `npm link`, `mbtool --help`, and `mbtool --version` all exited successfully. The test suite has 17 passing tests covering core normalization/matching, provider parsers and URL resolution, Qobuz authenticated-API ISRC parsing, malformed payloads, ISRC agreement/conflict, and credential diagnostics. Live commands were executed against multiple releases: Discogs credits on `aa6c4473-3528-41c2-b55b-d9e18bdba4ff`, Qobuz credits and platform verification on `bca1db3d-9305-411d-b1ff-4a75e35aa1da`, Deezer ISRC/platform discovery, Tidal authentication behavior, JSON output, and `jq` parse checks.
 
 ## Coverage
 
@@ -58,8 +58,8 @@ Remaining limitations are provider-side: Qobuz ISRC API and Tidal catalog/credit
 
 ## Commits
 
-The work is on branch `feat/cli-port`. The repository history remains upstream history plus focused commits: `c31de726 feat(cli): add browser-independent MusicBrainz CLI`, `b052f0e5 docs(cli): document architecture and validation`, `b39b0bbd chore: close CLI port completion ledger`, `77021ab8 feat(providers): add external credit ISRC and platform discovery`, and `007eb6c3 docs: record functional provider completion evidence`. No upstream files were mass-moved or cosmetically reformatted.
+The work is on branch `feat/cli-port`. The repository history remains upstream history plus focused commits: `c31de726 feat(cli): add browser-independent MusicBrainz CLI`, `b052f0e5 docs(cli): document architecture and validation`, `b39b0bbd chore: close CLI port completion ledger`, `77021ab8 feat(providers): add external credit ISRC and platform discovery`, `007eb6c3 docs: record functional provider completion evidence`, and `3bad62be docs: close functional completion pass ledger`. No upstream files were mass-moved or cosmetically reformatted.
 
 ## Clean-checkout validation
 
-`npm ci` was run successfully from the repository package manifest, followed by a successful build and 7-test suite. The final clean workflow is rerun immediately before delivery.
+`npm ci` was run successfully from the repository package manifest, followed by successful typecheck, build, 17-test suite, link, CLI bootstrap, multi-release provider smoke commands, and JSON parsing. The worktree is clean after the focused commits.
