@@ -46,7 +46,7 @@ Additional authenticated provider adapters, stronger candidate search and track-
 
 ## Commits
 
-The work is on branch `feat/cli-port`. The repository history remains upstream history plus the working-tree port; no upstream files were mass-moved or cosmetically reformatted. Commit creation is deferred until final verification so the delivery commit can include only verified artifacts.
+The work is on branch `feat/cli-port`. The repository history remains upstream history plus three focused commits: `c31de726 feat(cli): add browser-independent MusicBrainz CLI`, `b052f0e5 docs(cli): document architecture and validation`, and `b39b0bbd chore: close CLI port completion ledger`. No upstream files were mass-moved or cosmetically reformatted.
 
 ## Clean-checkout validation
 
