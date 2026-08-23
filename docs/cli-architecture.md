@@ -18,6 +18,8 @@ CLI commands and JSON/human reporters
 
 The root package is TypeScript ESM and emits `dist/`. The executable is `mbtool`. The existing userscripts remain in their original directories, which keeps the fork mergeable and leaves a future shared-core migration possible.
 
+Provider adapters expose explicit capability declarations and normalize their results into `ProviderReleaseCandidate`, `ProviderTrackMetadata`, and `ProviderCredit`. Current adapters are Discogs (API release search/credits/platform verification), Qobuz (search/store-page credits/platform verification and token-gated album ISRC API), Tidal (token-gated search/credits/catalog ISRC API), and Deezer (public search/detail/platform/ISRC API).
+
 ## Browser independence
 
 `src/core`, `src/providers`, and `src/shared` use no `document`, `window`, `location`, Greasemonkey/Tampermonkey APIs, DOM selectors, or browser automation. `HttpClient` is the CLI-side HTTP boundary. A future userscript adapter can implement an equivalent request boundary without moving provider and matching logic back into a page script.

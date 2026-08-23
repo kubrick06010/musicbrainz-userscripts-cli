@@ -72,6 +72,8 @@ mbtool platforms <MBID> --json
 mbtool config show
 ```
 
-The CLI accepts raw release MBIDs and MusicBrainz release URLs. Normal output goes to stdout and diagnostics go to stderr. `--no-cache` disables the filesystem cache for a command. Configuration is read from `~/.config/mbtool/config.json` (or `$XDG_CONFIG_HOME/mbtool/config.json`); `MBTOOL_USER_AGENT` and `MBTOOL_DISCOGS_TOKEN` are supported environment overrides. v0.1 never edits MusicBrainz.
+The CLI accepts raw release MBIDs and MusicBrainz release URLs. Normal output goes to stdout and diagnostics go to stderr. `--no-cache` disables the filesystem cache for a command. Configuration is read from `~/.config/mbtool/config.json` (or `$XDG_CONFIG_HOME/mbtool/config.json`); `MBTOOL_USER_AGENT`, `MBTOOL_DISCOGS_TOKEN`, `MBTOOL_QOBUZ_TOKEN`, `MBTOOL_TIDAL_ACCESS_TOKEN`, `MBTOOL_TIDAL_CLIENT_ID`, and `MBTOOL_TIDAL_CLIENT_SECRET` are supported environment overrides. Discogs, Qobuz store pages, and Deezer are usable without provider credentials; Qobuz ISRC API and Tidal catalog/credits require provider credentials. v0.1 never edits MusicBrainz.
+
+Provider capabilities and live evidence are documented in [functional gap analysis](docs/functional-gap-analysis.md) and [live smoke matrix](docs/live-smoke-matrix.md). Provider errors are retained in JSON diagnostics as `NO_MATCH`, `AUTH_REQUIRED`, `RATE_LIMITED`, `NETWORK_ERROR`, `PARSER_ERROR`, or related statuses.
 
 Exit codes are 0 success, 1 generic error, 2 invalid input, 3 network error, 4 provider error, and 5 MusicBrainz error. See [CLI architecture](docs/cli-architecture.md) and [roadmap](CLI_ROADMAP.md).

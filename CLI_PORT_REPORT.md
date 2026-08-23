@@ -44,6 +44,18 @@ None. The upstream userscripts' browser test suites require their own Playwright
 
 Additional authenticated provider adapters, stronger candidate search and track-level platform verification, ListenBrainz resolution, and explicit review-gated optional writes are tracked in `CLI_ROADMAP.md`.
 
+## Functional Completion Pass
+
+The previous CLI skeleton mostly echoed MusicBrainz relationships and emitted placeholder provider candidates. This pass audited the upstream Credit Hoarder, ISRC Scout, and Platform Check provider paths and added genuine external read-side adapters.
+
+Discogs now resolves release/master relationships, searches the Discogs API, retrieves release JSON, parses tracklists and nested/release credits, and verifies platform candidates. Qobuz now searches/fetches server-rendered store pages and parses per-track production/composition credits; its authenticated `album/get` path is available through `MBTOOL_QOBUZ_TOKEN` for ISRCs. Tidal now has credential-gated search, credits endpoint parsing, and catalog ISRC retrieval through `MBTOOL_TIDAL_ACCESS_TOKEN` or client credentials. Deezer now resolves public album candidates and fetches per-track detail records for real ISRCs.
+
+External credits are compared against normalized MusicBrainz relationship names/roles, and `--missing` filters genuinely absent external credits. External ISRC candidates are matched by title, artist, position, and duration; repeated provider values produce agreement counts and differing values produce `CONFLICT`. Platform Check now returns `FOUND`, `EXISTING`, `CONFLICT`, `MISSING`, or `UNVERIFIED` based on external candidate evidence and track counts. `inspect` includes external missing credits, ISRC candidates/conflicts, platform findings, diagnostics, and actionable commands.
+
+Provider parser fixtures and matching tests increased the suite from 7 to 17 tests, covering Discogs/Qobuz/Tidal/Deezer parsing, malformed payloads, URL variants, Qobuz authenticated-API ISRC parsing, release matching, ISRC agreement/conflict, and credential diagnostics. Live evidence is recorded in [docs/live-smoke-matrix.md](docs/live-smoke-matrix.md): Discogs returned 28 missing credits, Qobuz returned 62 credits/39 missing, Deezer returned 14 real ISRC matches and a verified external platform, and Qobuz/Deezer platform verification succeeded on the 16-track Picó release. Tidal was exercised and returned a concrete HTTP 401 authentication requirement; its credential path and diagnostics are implemented but no anonymous Tidal data is claimed.
+
+Remaining limitations are provider-side: Qobuz ISRC API and Tidal catalog/credits require credentials, Discogs HTML is Cloudflare-protected so the API is used, and Discogs is not claimed as an ISRC provider because upstream does not expose a reliable read-side ISRC path there. See [functional gap analysis](docs/functional-gap-analysis.md) for the exact PORTED/PARTIALLY_PORTED/NOT_PORTED classification.
+
 ## Commits
 
 The work is on branch `feat/cli-port`. The repository history remains upstream history plus three focused commits: `c31de726 feat(cli): add browser-independent MusicBrainz CLI`, `b052f0e5 docs(cli): document architecture and validation`, and `b39b0bbd chore: close CLI port completion ledger`. No upstream files were mass-moved or cosmetically reformatted.

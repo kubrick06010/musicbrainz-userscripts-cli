@@ -44,3 +44,24 @@ Status values are not started, in progress, complete, or blocked.
 - [x] Create `CLI_PORT_REPORT.md`
 - [x] Preserve GPL-3.0 notices and review git history/status
 - [x] Completion gate: no unfinished entries remain
+
+## Functional completion pass
+
+- [x] Audit real upstream provider behavior
+- [x] Credit Hoarder external discovery
+- [x] Qobuz credits
+- [x] Tidal credits (credential-gated; anonymous endpoint verified as HTTP 401)
+- [x] Discogs credits
+- [x] Credit `--missing` semantics
+- [x] ISRC Scout external provider discovery
+- [x] Multi-provider ISRC agreement/conflict
+- [x] Platform Check external discovery
+- [x] Inspect credit integration
+- [x] Provider structured diagnostics
+- [x] Provider fixture tests
+- [x] Expanded functional tests
+- [x] Real regression comparison
+- [x] Multi-release live smoke matrix
+- [x] Documentation accuracy audit
+- [ ] Clean build/test validation
+- [ ] Final functional completion audit
