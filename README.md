@@ -42,5 +42,8 @@ Merge duplicate recordings: review UI, auto-match, background submit
 
 ---
 
-[Bandcamp Player Enhanced](./userscripts/bandcamp_player_enhanced/README.md)<img src="./userscripts/bandcamp_player_enhanced/icon.svg" align="left" width="32"><br>
+[NTS Guide collector](./scripts/nts_guide_collector/README.md)<br>
+Read-only coverage-first inventory and MusicBrainz preflight for the NTS Guide archive
+
+[Bandcamp Player Enhanced](./userscripts/bandcamp_player_enhanced/README.md)<img src="./userscripts/bandcamp_player_enhanced/icon.png" align="left" width="32"><br>
 Bandcamp album player with keyboard shortcuts
