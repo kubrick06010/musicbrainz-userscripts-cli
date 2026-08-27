@@ -10,9 +10,11 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import sys
 import tempfile
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -38,6 +40,32 @@ def _field(name: str, value: Any) -> tuple[str, str] | None:
     return name, str(value)
 
 
+def _norm(value: str | None) -> str:
+    text = unicodedata.normalize("NFKC", value or "").casefold().strip()
+    text = re.sub(r"[‐‑‒–—−]", "-", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def _safe_query_names(name: str) -> list[tuple[str, str]]:
+    """Return conservative search variants while preserving the original credit."""
+    variants = [(name.strip(), "source credit")]
+    aka = re.split(r"\s+aka\s+", name, maxsplit=1, flags=re.I)
+    if len(aka) == 2:
+        variants.extend([(aka[0].strip(), "AKA left side"), (aka[1].strip(), "AKA right side")])
+    parenthetical = re.match(r"^(.+?)\s*\(([^()]*)\)\s*$", name)
+    if parenthetical:
+        variants.append((parenthetical.group(1).strip(), "parenthetical context stripped"))
+    out = []
+    seen = set()
+    for value, basis in variants:
+        key = _norm(value)
+        if value and key not in seen:
+            seen.add(key)
+            out.append((value, basis))
+    return out
+
+
 def _get_json(url: str, progress: bool = False) -> Any:
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     for attempt in range(4):
@@ -61,52 +89,83 @@ def _mb_search(entity: str, query: str, limit: int = 10, progress: bool = False)
     return data.get(entity + "s", [])
 
 
-def _exact_artist_hits(name: str, progress: bool = False) -> list[dict[str, Any]]:
+def _artist_names(hit: dict[str, Any]) -> set[str]:
+    names = {hit.get("name"), hit.get("sort-name")}
+    for alias in hit.get("aliases") or []:
+        if isinstance(alias, dict):
+            names.add(alias.get("name"))
+            names.add(alias.get("sort-name"))
+        elif isinstance(alias, str):
+            names.add(alias)
+    return {_norm(name) for name in names if name}
+
+
+def _matching_artist_hits(name: str, progress: bool = False) -> list[dict[str, Any]]:
+    # inc=aliases is not supported on search requests, but aliases matching the query
+    # are included by MusicBrainz search results. Match canonical/sort/alias names.
     hits = _mb_search("artist", f'artist:"{name}"', progress=progress)
-    return [hit for hit in hits if (hit.get("name") or "").casefold() == name.casefold() and int(hit.get("score", 0)) >= 95]
+    wanted = _norm(name)
+    matched = []
+    for hit in hits:
+        if int(hit.get("score", 0)) < 95:
+            continue
+        if wanted in _artist_names(hit):
+            matched.append(hit)
+    return matched
+
+
+def _recording_artist_mbids(track_title: str, search_name: str, progress: bool = False) -> set[str]:
+    recordings = _mb_search("recording", f'recording:"{track_title}" AND artist:"{search_name}"', progress=progress)
+    mbids = set()
+    for recording in recordings:
+        if int(recording.get("score", 0)) < 90:
+            continue
+        for credit in recording.get("artist-credit") or []:
+            artist = credit.get("artist") if isinstance(credit, dict) else None
+            if artist and artist.get("id"):
+                mbids.add(artist["id"])
+    return mbids
 
 
 def resolve_track_artist(name: str, track_title: str | None = None, progress: bool = False) -> dict[str, Any]:
-    """Resolve a track artist only when the MusicBrainz match is deterministic.
+    """Resolve canonical names, aliases/transliterations and safe credit wrappers."""
+    candidates: dict[str, tuple[dict[str, Any], str, str]] = {}
+    for search_name, variant_basis in _safe_query_names(name):
+        for hit in _matching_artist_hits(search_name, progress=progress):
+            mbid = hit.get("id")
+            if mbid:
+                candidates[mbid] = (hit, search_name, variant_basis)
 
-    1) A single high-confidence exact artist-name hit is accepted.
-    2) If several exact-name artists exist, use recording title + artist name to
-       disambiguate only when that points to exactly one of those artist MBIDs.
-    """
-    exact = _exact_artist_hits(name, progress=progress)
-    if len(exact) == 1:
-        hit = exact[0]
-        return {"status": "resolved", "name": hit.get("name") or name, "mbid": hit.get("id"), "basis": "unique exact artist name"}
-    if not exact:
-        return {"status": "unresolved", "name": name, "mbid": None, "basis": "no high-confidence exact artist name"}
+    if len(candidates) == 1:
+        hit, search_name, variant_basis = next(iter(candidates.values()))
+        canonical = hit.get("name") or search_name
+        basis = "unique MusicBrainz canonical/alias match"
+        if variant_basis != "source credit":
+            basis += f" via {variant_basis}"
+        return {"status": "resolved", "name": canonical, "mbid": hit.get("id"), "basis": basis}
 
-    if track_title:
-        recordings = _mb_search("recording", f'recording:"{track_title}" AND artist:"{name}"', progress=progress)
-        allowed = {hit.get("id") for hit in exact if hit.get("id")}
-        matched: dict[str, str] = {}
-        for recording in recordings:
-            for credit in recording.get("artist-credit") or []:
-                artist = credit.get("artist") if isinstance(credit, dict) else None
-                if not artist:
-                    continue
-                mbid = artist.get("id")
-                artist_name = artist.get("name") or credit.get("name")
-                if mbid in allowed and (artist_name or "").casefold() == name.casefold():
-                    matched[mbid] = artist_name or name
+    if candidates and track_title:
+        recording_mbids = set()
+        for _hit, search_name, _basis in candidates.values():
+            recording_mbids |= _recording_artist_mbids(track_title, search_name, progress=progress)
+        matched = [value for mbid, value in candidates.items() if mbid in recording_mbids]
         if len(matched) == 1:
-            mbid, resolved_name = next(iter(matched.items()))
-            return {"status": "resolved", "name": resolved_name, "mbid": mbid, "basis": "recording title + artist disambiguation"}
+            hit, search_name, variant_basis = matched[0]
+            canonical = hit.get("name") or search_name
+            return {
+                "status": "resolved", "name": canonical, "mbid": hit.get("id"),
+                "basis": f"recording title + MusicBrainz alias disambiguation via {variant_basis}",
+            }
 
-    return {"status": "unresolved", "name": name, "mbid": None, "basis": f"ambiguous exact artist name ({len(exact)} candidates)"}
+    if not candidates:
+        return {"status": "unresolved", "name": name, "mbid": None, "basis": "no high-confidence canonical or alias match"}
+    return {"status": "unresolved", "name": name, "mbid": None, "basis": f"ambiguous canonical/alias match ({len(candidates)} candidates)"}
 
 
 def resolve_track_artists(candidate: dict[str, Any], progress: bool = True) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    release = candidate.get("release") or {}
-    medium = release.get("medium") or {}
-    tracks = medium.get("tracks") or []
+    tracks = ((candidate.get("release") or {}).get("medium") or {}).get("tracks") or []
     cache: dict[tuple[str, str | None], dict[str, Any]] = {}
-    unresolved: list[dict[str, Any]] = []
-
+    unresolved = []
     _progress(progress, f"[MB] resolving track artists for {len(tracks)} tracks")
     for track_index, track in enumerate(tracks):
         title = track.get("title")
@@ -117,17 +176,12 @@ def resolve_track_artists(candidate: dict[str, Any], progress: bool = True) -> t
                 _progress(progress, f"[{track_index + 1:>2}/{len(tracks)}] resolve {artist_name} — {title or '[untitled]'}")
                 cache[key] = resolve_track_artist(artist_name, title, progress=progress)
             resolution = cache[key]
-            resolved_artists.append({
-                "name": artist_name,
-                "mbid": resolution.get("mbid"),
-                "status": resolution.get("status"),
-                "basis": resolution.get("basis"),
-            })
+            resolved_artists.append({"name": artist_name, "mbid": resolution.get("mbid"), "status": resolution.get("status"), "basis": resolution.get("basis"), "canonical_name": resolution.get("name")})
             if resolution.get("status") != "resolved" or not resolution.get("mbid"):
                 unresolved.append({"track": track_index + 1, "title": title, "artist": artist_name, "reason": resolution.get("basis")})
         track["artist_resolutions"] = resolved_artists
-
-    _progress(progress, f"[MB] track artists: {sum(1 for t in tracks for a in t.get('artist_resolutions') or [] if a.get('mbid'))} resolved; {len(unresolved)} unresolved")
+    resolved_count = sum(1 for track in tracks for artist in track.get("artist_resolutions") or [] if artist.get("mbid"))
+    _progress(progress, f"[MB] track artists: {resolved_count} resolved; {len(unresolved)} unresolved")
     return candidate, unresolved
 
 
@@ -158,7 +212,6 @@ def build_seed_fields(candidate: dict[str, Any], require_resolved_track_artists:
             raise ValueError(f"track artists are not fully resolved: {preview}{suffix}")
 
     fields: list[tuple[str, str]] = []
-
     def add(name: str, value: Any) -> None:
         item = _field(name, value)
         if item:
@@ -173,12 +226,9 @@ def build_seed_fields(candidate: dict[str, Any], require_resolved_track_artists:
     date = release.get("date")
     if date:
         parts = date.split("-")
-        if len(parts) >= 1:
-            add("events.0.date.year", parts[0])
-        if len(parts) >= 2:
-            add("events.0.date.month", parts[1])
-        if len(parts) >= 3:
-            add("events.0.date.day", parts[2])
+        if parts: add("events.0.date.year", parts[0])
+        if len(parts) >= 2: add("events.0.date.month", parts[1])
+        if len(parts) >= 3: add("events.0.date.day", parts[2])
     add("events.0.country", release.get("country"))
 
     label = release.get("label") or {}
@@ -190,11 +240,9 @@ def build_seed_fields(candidate: dict[str, Any], require_resolved_track_artists:
     artists = artist_credit.get("artists") or []
     for index, artist in enumerate(artists):
         add(f"artist_credit.names.{index}.mbid", artist.get("mbid"))
-        credited_as = artist.get("credited_as") or artist.get("name")
-        add(f"artist_credit.names.{index}.name", credited_as)
+        add(f"artist_credit.names.{index}.name", artist.get("credited_as") or artist.get("name"))
         add(f"artist_credit.names.{index}.artist.name", artist.get("name"))
-        if index < len(artists) - 1:
-            add(f"artist_credit.names.{index}.join_phrase", ", ")
+        if index < len(artists) - 1: add(f"artist_credit.names.{index}.join_phrase", ", ")
 
     add("mediums.0.format", medium.get("format"))
     for track_index, track in enumerate(medium.get("tracks") or []):
@@ -202,58 +250,30 @@ def build_seed_fields(candidate: dict[str, Any], require_resolved_track_artists:
         add(f"mediums.0.track.{track_index}.number", track.get("position"))
         if track.get("recording_mbid"):
             add(f"mediums.0.track.{track_index}.recording", track.get("recording_mbid"))
-
-        track_artists = track.get("artist_names") or []
         resolutions = track.get("artist_resolutions") or []
-        for artist_index, artist_name in enumerate(track_artists):
+        for artist_index, artist_name in enumerate(track.get("artist_names") or []):
             resolution = resolutions[artist_index] if artist_index < len(resolutions) else {}
             add(f"mediums.0.track.{track_index}.artist_credit.names.{artist_index}.mbid", resolution.get("mbid"))
             add(f"mediums.0.track.{track_index}.artist_credit.names.{artist_index}.name", artist_name)
-            add(f"mediums.0.track.{track_index}.artist_credit.names.{artist_index}.artist.name", resolution.get("name") or artist_name)
-            if artist_index < len(track_artists) - 1:
+            add(f"mediums.0.track.{track_index}.artist_credit.names.{artist_index}.artist.name", resolution.get("canonical_name") or artist_name)
+            if artist_index < len(track.get("artist_names") or []) - 1:
                 add(f"mediums.0.track.{track_index}.artist_credit.names.{artist_index}.join_phrase", ", ")
 
-    urls = candidate.get("urls") or []
-    for index, url in enumerate(urls):
+    for index, url in enumerate(candidate.get("urls") or []):
         add(f"urls.{index}.url", url.get("url"))
-
     source_url = source.get("url")
-    edit_note = (
-        "Seeded from the official NTS episode page using musicbrainz-userscripts-cli.\n"
-        f"Source: {source_url}\n"
-        "Track artists were resolved conservatively against MusicBrainz before seeding.\n"
-        "Please review all fields, relationships, and track credits before submitting."
-    )
-    add("edit_note", edit_note)
+    add("edit_note", "Seeded from the official NTS episode page using musicbrainz-userscripts-cli.\n" f"Source: {source_url}\n" "Track artists were resolved conservatively against MusicBrainz before seeding.\n" "Please review all fields, relationships, and track credits before submitting.")
     return fields
 
 
-def render_html(candidate: dict[str, Any]) -> str:
-    fields = build_seed_fields(candidate)
+def _render_page(candidate: dict[str, Any], fields: list[tuple[str, str]]) -> str:
     title = candidate.get("release", {}).get("title") or "MusicBrainz release"
-    inputs = "\n".join(
-        f'<input type="hidden" name="{html.escape(name, quote=True)}" value="{html.escape(value, quote=True)}">'
-        for name, value in fields
-    )
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Seed MusicBrainz — {html.escape(title)}</title>
-<style>body{{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}}button{{font-size:1rem;padding:.7rem 1rem}}code{{word-break:break-all}}</style>
-</head>
-<body>
-<h1>MusicBrainz release-editor seed</h1>
-<p><strong>{html.escape(title)}</strong></p>
-<p>This page does not submit an edit. It only opens MusicBrainz's Add Release editor with the candidate fields prefilled.</p>
-<form action="{SEED_ACTION}" method="post" accept-charset="UTF-8">
-{inputs}
-<button type="submit">Open prefilled MusicBrainz editor</button>
-</form>
-<p>Source: <code>{html.escape(candidate.get('source', {}).get('url') or '')}</code></p>
-</body>
-</html>
-"""
+    inputs = "\n".join(f'<input type="hidden" name="{html.escape(name, quote=True)}" value="{html.escape(value, quote=True)}">' for name, value in fields)
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Seed MusicBrainz — {html.escape(title)}</title><style>body{{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}}button{{font-size:1rem;padding:.7rem 1rem}}code{{word-break:break-all}}</style></head><body><h1>MusicBrainz release-editor seed</h1><p><strong>{html.escape(title)}</strong></p><p>This page does not submit an edit. It only opens MusicBrainz's Add Release editor with the candidate fields prefilled.</p><form action="{SEED_ACTION}" method="post" accept-charset="UTF-8">{inputs}<button type="submit">Open prefilled MusicBrainz editor</button></form><p>Source: <code>{html.escape(candidate.get('source', {}).get('url') or '')}</code></p></body></html>'''
+
+
+def render_html(candidate: dict[str, Any]) -> str:
+    return _render_page(candidate, build_seed_fields(candidate))
 
 
 def main() -> None:
@@ -266,30 +286,14 @@ def main() -> None:
     args = parser.parse_args()
 
     candidate = json.loads(Path(args.candidate).read_text(encoding="utf-8"))
-    progress = not args.quiet
     try:
-        candidate, unresolved = resolve_track_artists(candidate, progress=progress)
+        candidate, unresolved = resolve_track_artists(candidate, progress=not args.quiet)
         if unresolved and not args.allow_unresolved_track_artists:
             preview = "\n".join(f"  track {item['track']}: {item['artist']} — {item['reason']}" for item in unresolved[:12])
             suffix = f"\n  ... +{len(unresolved) - 12} more" if len(unresolved) > 12 else ""
-            raise ValueError(
-                "cannot generate a fully matched MusicBrainz seed; unresolved track artists remain:\n"
-                + preview + suffix
-                + "\nUse --allow-unresolved-track-artists only if you intend to match those artists manually in the Release Editor."
-            )
-        rendered = build_seed_fields(candidate, require_resolved_track_artists=not args.allow_unresolved_track_artists)
-        title = candidate.get("release", {}).get("title") or "MusicBrainz release"
-        inputs = "\n".join(
-            f'<input type="hidden" name="{html.escape(name, quote=True)}" value="{html.escape(value, quote=True)}">'
-            for name, value in rendered
-        )
-        page = f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Seed MusicBrainz — {html.escape(title)}</title>
-<style>body{{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}}button{{font-size:1rem;padding:.7rem 1rem}}code{{word-break:break-all}}</style></head>
-<body><h1>MusicBrainz release-editor seed</h1><p><strong>{html.escape(title)}</strong></p>
-<p>This page does not submit an edit. It only opens MusicBrainz's Add Release editor with the candidate fields prefilled.</p>
-<form action="{SEED_ACTION}" method="post" accept-charset="UTF-8">{inputs}<button type="submit">Open prefilled MusicBrainz editor</button></form>
-<p>Source: <code>{html.escape(candidate.get('source', {}).get('url') or '')}</code></p></body></html>"""
+            raise ValueError("cannot generate a fully matched MusicBrainz seed; unresolved track artists remain:\n" + preview + suffix + "\nUse --allow-unresolved-track-artists only if you intend to match those artists manually in the Release Editor.")
+        fields = build_seed_fields(candidate, require_resolved_track_artists=not args.allow_unresolved_track_artists)
+        page = _render_page(candidate, fields)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -301,13 +305,9 @@ def main() -> None:
         with handle:
             handle.write(page)
         output = Path(handle.name)
-
     print(f"seed HTML: {output}")
     print("safety: opening this file does NOT submit a MusicBrainz edit; use its button to open the prefilled editor")
-    if unresolved:
-        print(f"track artists requiring manual match: {len(unresolved)}")
-    else:
-        print("track artists: all resolved to MusicBrainz MBIDs")
+    print(f"track artists requiring manual match: {len(unresolved)}" if unresolved else "track artists: all resolved to MusicBrainz MBIDs")
     if args.open:
         webbrowser.open(output.resolve().as_uri())
 
