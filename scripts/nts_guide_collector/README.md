@@ -14,6 +14,12 @@ It deliberately does **not** submit edits.
 python3 scripts/nts_guide_collector/nts-guide-collector.py -o nts-guide-inventory.json
 ```
 
+For a small live smoke test:
+
+```bash
+python3 scripts/nts_guide_collector/nts-guide-collector.py --max-episodes 5 -o nts-guide-smoke.json
+```
+
 To collect NTS data without querying MusicBrainz:
 
 ```bash
@@ -29,11 +35,16 @@ When MB lookups are enabled it:
 - extracts explicit `selected and mixed by`, `mixed by`, `selected by`, and `curated by` credits;
 - resolves credited people against MusicBrainz, retaining candidate MBIDs and scores rather than silently choosing ambiguous matches;
 - searches for possible duplicate releases by title/date;
+- optionally reads a MusicBrainz OAuth access token from `.mb_token.json` (or a path passed with `--mb-token-file`) and sends it as a Bearer token;
+- still supports anonymous MusicBrainz reads when no token file exists;
+- retries transient HTTP `429`, `500`, `502`, `503`, and `504` responses with bounded backoff and records exhausted transient failures in the inventory summary;
 - seeds the known NTS Radio label MBID (`2528f939-28ca-4da6-86c9-c6aab7bc4bc2`);
 - proposes `Official`, `Digital Media`, `Worldwide`, and `Broadcast + DJ-mix` as reviewable MusicBrainz fields;
 - never submits an edit.
 
-MusicBrainz requests are serialized with a delay to respect the public web-service rate guidance.
+MusicBrainz requests remain serialized with a delay to respect the public web-service rate guidance.
+
+The canonical output schema is currently `nts-guide-collector/v2` and reports the MusicBrainz access mode (`bearer`, `anonymous`, or `disabled`) plus the number of exhausted transient MusicBrainz requests.
 
 ## Status contract
 
