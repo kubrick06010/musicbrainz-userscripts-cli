@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import importlib.util
+import io
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,6 +21,14 @@ def episode(name="Example", description="", tracklist=None):
         "description": description,
         "media": {"picture_large": "https://example.invalid/cover.jpg"},
         "tracklist": tracklist if tracklist is not None else [{"title": "Track", "mainArtists": [{"name": "Artist"}]}],
+    }
+
+
+def classified_result(title="Example"):
+    return {
+        "nts": {"title": title, "cover_url": "https://example.invalid/cover.jpg"},
+        "creation_readiness": {"status": "CREATABLE", "blockers": []},
+        "enrichment": {"status": "COMPLETE", "pending": []},
     }
 
 
@@ -73,6 +83,24 @@ class NTSGuideCollectorTest(unittest.TestCase):
             result = collector.classify(ep, False, None)
         self.assertEqual(result["creation_readiness"]["status"], "BLOCKED")
         self.assertIn("duplicate_check_not_run", result["creation_readiness"]["blockers"])
+
+    def test_single_episode_mode_bypasses_archive_index(self):
+        with patch.object(collector, "classify", return_value=classified_result("Single episode")) as classify_mock, \
+             patch.object(collector, "get_json", side_effect=AssertionError("archive index should not be fetched")):
+            result = collector.collect("the-nts-guide-to", 50, True, "token", episode_alias="single-alias", progress=False)
+        self.assertEqual(result["episode_count"], 1)
+        self.assertEqual(result["coverage_counts"]["CREATABLE"], 1)
+        classify_mock.assert_called_once()
+
+    def test_progress_is_emitted_to_stderr(self):
+        buffer = io.StringIO()
+        with patch.object(collector, "classify", return_value=classified_result("Single episode")), redirect_stderr(buffer):
+            collector.collect("the-nts-guide-to", 50, True, "token", episode_alias="single-alias", progress=True)
+        output = buffer.getvalue()
+        self.assertIn("single-episode mode", output)
+        self.assertIn("[  1/1]", output)
+        self.assertIn("CREATABLE", output)
+        self.assertIn("[DONE]", output)
 
 
 if __name__ == "__main__":
