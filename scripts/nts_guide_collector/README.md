@@ -16,9 +16,41 @@ Optional mixer/compiler resolution, tracklist completeness and artwork enrichmen
 
 ## Usage
 
+Full archive:
+
 ```bash
 python3 scripts/nts_guide_collector/nts-guide-collector.py -o nts-guide-inventory.json
 ```
+
+The collector prints live progress to `stderr` by default, including current episode, CREATABLE/BLOCKED state, enrichment state, elapsed time and ETA. Final JSON/stdout remains machine-readable.
+
+Example progress:
+
+```text
+[NTS] discovered 426 episodes; processing 426
+[  1/426] processing the-nts-guide-to-example-1st-january-2026
+[  1/426] CREATABLE | enrich PENDING  | elapsed 00:03 | ETA 21:15 | NTS Guide to: Example
+...
+[DONE] 426 episodes | CREATABLE 416 | BLOCKED 10 | elapsed 18:42
+```
+
+Suppress progress for automation:
+
+```bash
+python3 scripts/nts_guide_collector/nts-guide-collector.py --quiet -o nts-guide-inventory.json
+```
+
+### Single episode
+
+When working on one release, do not scan the full archive. Pass the exact NTS episode alias:
+
+```bash
+python3 scripts/nts_guide_collector/nts-guide-collector.py \
+  --episode the-nts-guide-to-90s-00s-japanese-techno-20th-august-2026 \
+  -o japanese-techno-inventory.json
+```
+
+`--episode` fetches and classifies only that episode and is mutually exclusive with `--max-episodes`.
 
 Small live smoke test:
 
@@ -46,7 +78,7 @@ When MB lookups are enabled the collector:
 - searches for possible duplicate releases by title/date;
 - distinguishes a successful zero-result search from an exhausted transient MusicBrainz failure;
 - optionally reads an OAuth access token from `.mb_token.json` or `--mb-token-file`;
-- retries transient HTTP `429`, `500`, `502`, `503`, and `504` responses with bounded backoff;
+- retries transient HTTP `429`, `500`, `502`, `503`, and `504` responses with bounded backoff and reports retries on `stderr`;
 - seeds the NTS Radio label MBID `2528f939-28ca-4da6-86c9-c6aab7bc4bc2`;
 - proposes `Official`, `Digital Media`, `Worldwide`, and `Broadcast + DJ-mix` as reviewable MusicBrainz fields;
 - never submits an edit.
