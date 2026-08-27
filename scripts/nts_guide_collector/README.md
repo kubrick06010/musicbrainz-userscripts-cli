@@ -4,9 +4,15 @@ Read-only collector/preflight tool for turning the complete NTS **NTS Guide toâ€
 
 It deliberately does **not** submit edits.
 
-## Pipeline
+## Goal
 
-`NTS -> canonical inventory -> MusicBrainz resolution/duplicate checks -> READY / REVIEW / BLOCKED -> future Scribe/Falcon payload`
+Coverage first, enrichment later.
+
+The v3 schema separates whether a release can be safely created from whether all optional metadata has been enriched:
+
+`NTS -> canonical inventory -> duplicate safety -> CREATABLE / BLOCKED`
+
+Optional mixer/compiler resolution, tracklist completeness and artwork enrichment are reported independently.
 
 ## Usage
 
@@ -14,46 +20,74 @@ It deliberately does **not** submit edits.
 python3 scripts/nts_guide_collector/nts-guide-collector.py -o nts-guide-inventory.json
 ```
 
-For a small live smoke test:
+Small live smoke test:
 
 ```bash
 python3 scripts/nts_guide_collector/nts-guide-collector.py --max-episodes 5 -o nts-guide-smoke.json
 ```
 
-To collect NTS data without querying MusicBrainz:
+Collect source data without MusicBrainz lookups:
 
 ```bash
 python3 scripts/nts_guide_collector/nts-guide-collector.py --no-musicbrainz -o nts-guide-inventory.json
 ```
 
-The collector paginates `/api/v2/shows/the-nts-guide-to/episodes`, then requests each episode as JSON. It preserves the NTS source URL, title, broadcast timestamp, location, description, genres, largest advertised picture, Mixcloud/audio sources and structured tracklist (`mainArtists`, `featuringArtists`, `remixArtists`, `offset`).
+When duplicate checking is disabled, releases remain blocked for creation because duplicate safety has not been established.
 
 ## MusicBrainz preflight
 
-When MB lookups are enabled it:
+When MB lookups are enabled the collector:
 
-- extracts explicit `selected and mixed by`, `mixed by`, `selected by`, and `curated by` credits;
-- resolves credited people against MusicBrainz, retaining candidate MBIDs and scores rather than silently choosing ambiguous matches;
+- extracts explicit selector/mixer/compiler credits when NTS supplies them;
+- supports obvious deterministic variants such as `selected & mixed by`, `compiled by`, `selections by`, and `words and selections by`;
+- preserves the original raw credit text;
+- splits plainly plural credits such as `Selected by A and B` into separate enrichment candidates without aggressively splitting ambiguous names;
+- resolves credited people against MusicBrainz conservatively;
 - searches for possible duplicate releases by title/date;
-- optionally reads a MusicBrainz OAuth access token from `.mb_token.json` (or a path passed with `--mb-token-file`) and sends it as a Bearer token;
-- still supports anonymous MusicBrainz reads when no token file exists;
-- retries transient HTTP `429`, `500`, `502`, `503`, and `504` responses with bounded backoff and records exhausted transient failures in the inventory summary;
-- seeds the known NTS Radio label MBID (`2528f939-28ca-4da6-86c9-c6aab7bc4bc2`);
+- distinguishes a successful zero-result search from an exhausted transient MusicBrainz failure;
+- optionally reads an OAuth access token from `.mb_token.json` or `--mb-token-file`;
+- retries transient HTTP `429`, `500`, `502`, `503`, and `504` responses with bounded backoff;
+- seeds the NTS Radio label MBID `2528f939-28ca-4da6-86c9-c6aab7bc4bc2`;
 - proposes `Official`, `Digital Media`, `Worldwide`, and `Broadcast + DJ-mix` as reviewable MusicBrainz fields;
 - never submits an edit.
 
-MusicBrainz requests remain serialized with a delay to respect the public web-service rate guidance.
+## v3 status contract
 
-The canonical output schema is currently `nts-guide-collector/v2` and reports the MusicBrainz access mode (`bearer`, `anonymous`, or `disabled`) plus the number of exhausted transient MusicBrainz requests.
+Each episode has two independent status blocks.
 
-## Status contract
+### `creation_readiness`
 
-- `READY`: no blockers or warnings found by the current rules.
-- `REVIEW`: usable source data but something needs a human decision (for example no explicit mixer credit or no tracklist).
-- `BLOCKED`: an ambiguous/unresolved credited artist or possible duplicate prevents generation from being treated as safe.
+- `CREATABLE`: enough NTS source metadata exists and MusicBrainz duplicate checking completed without finding a candidate.
+- `BLOCKED`: creation is unsafe because a likely duplicate exists, duplicate checking failed transiently/was not run, or required identifying metadata is missing.
 
-`READY` is intentionally conservative. A later phase should add release-group matching, cover-art existence/hash checks, recording/track-artist resolution, relationship payloads, and Scribe/Falcon exporters before any submission path is considered.
+Missing optional mixer/compiler information does **not** block creation.
+
+### `enrichment`
+
+- `COMPLETE`: no currently tracked enrichment gaps remain.
+- `PENDING`: one or more optional fields or relationships remain unresolved.
+
+Examples include no explicit mixer credit, unresolved explicit credit, missing tracklist, missing artwork, or a transient artist lookup.
 
 ## Safety invariant
 
-No MusicBrainz write endpoint exists in this module. Adding submission support should be a separate explicit phase with dry-run diff and human confirmation.
+No MusicBrainz write endpoint exists in this module. The collector never invents absent metadata. Duplicate detection remains the hard safety gate; optional enrichment can happen later.
+
+## Full-archive validation
+
+The validated coverage-first run over 426 NTS Guide episodes produced:
+
+- 416 `CREATABLE`
+- 10 `BLOCKED`
+- 3 convincing duplicate blocks
+- 7 transient duplicate-check blocks
+- 4 enrichment-complete episodes
+- 422 enrichment-pending episodes
+- 322 episodes without an explicit individual credit
+- 38 unresolved explicit credits
+- 15 episodes without a tracklist
+- 426/426 with cover artwork available
+
+The previous v2 classification was `15 READY / 373 REVIEW / 38 BLOCKED`; v3 therefore exposes 401 additional safely creatable releases without inventing metadata.
+
+The generated 426-episode inventory is a validation artifact and is intentionally not committed to the repository.
