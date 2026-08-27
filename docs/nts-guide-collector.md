@@ -8,6 +8,14 @@ Release creation safety and metadata enrichment are separate concerns.
 
 A release can be `CREATABLE` even when optional mixer/compiler relationships, track artist matching, timestamps, or other enrichment remain pending. The collector must never invent metadata that NTS did not publish.
 
+## Operational visibility
+
+The collector emits live progress to `stderr` by default so long archive runs are observable without contaminating JSON/stdout. Progress includes current episode, CREATABLE/BLOCKED status, enrichment status, elapsed time and ETA. Transient MusicBrainz retries are also reported.
+
+Use `--quiet` to suppress progress in automation.
+
+For targeted work, `--episode <exact-alias>` bypasses archive pagination and processes only that NTS episode. This is the preferred mode when building or reviewing one MusicBrainz candidate. `--episode` and `--max-episodes` are mutually exclusive.
+
 ## Hard creation gates
 
 Creation is blocked only when the release cannot be identified safely or duplicate safety has not been established. Current blockers include:
