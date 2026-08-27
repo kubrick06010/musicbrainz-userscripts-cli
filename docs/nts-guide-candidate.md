@@ -6,7 +6,7 @@ It does not submit edits.
 
 ## Why it exists
 
-The collector answers whether an NTS Guide episode is safe to represent. The candidate builder answers what we would try to create, while keeping required unknowns explicit instead of guessing.
+The collector answers whether an NTS Guide episode is safe to represent. The candidate builder answers what we would try to create and applies only deterministic MusicBrainz style rules.
 
 Pipeline:
 
@@ -32,35 +32,30 @@ python3 scripts/nts_guide_collector/nts-guide-candidate.py \
 
 ## Candidate contract
 
-The candidate preserves source-backed fields such as:
-
-- release/release-group title;
-- broadcast date as the proposed release date;
-- Official status;
-- Worldwide (`XW`);
-- NTS Radio label and MBID;
-- Digital Media format;
-- Broadcast / DJ-mix secondary types currently modeled by the collector;
-- NTS tracklist text and source artist names;
-- resolved explicit DJ/compiler relationships;
-- NTS URL;
-- artwork source URL;
-- NTS description, genres and audio references.
+The candidate preserves source-backed fields such as title, broadcast date, Official status, Worldwide (`XW`), NTS Radio label/MBID, Digital Media format, NTS tracklist text, resolved explicit relationships, NTS URL and artwork source URL.
 
 Every transformed field has a provenance entry.
 
-## Required unknowns
+## MusicBrainz type normalization
 
-The first candidate schema deliberately marks these as unresolved rather than guessing:
+MusicBrainz models `Broadcast` as a **primary** release-group type and `DJ-mix` as a secondary type. Older v3 inventories may contain both values in `release_group_secondary_types`; the candidate builder normalizes this to:
 
-- MusicBrainz release/release-group `artist_credit`;
-- release-group `primary_type`.
+- primary type: `Broadcast`
+- secondary type: `DJ-mix`
 
-A resolved mixer/compiler relationship is not automatically a release artist credit.
+## Release artist credit
 
-Track source names are also preserved without inventing recording MBIDs.
+The candidate builder follows the MusicBrainz artist-credit style rules rather than inventing a credit:
 
-Therefore a candidate can be valid for review while `submission_ready` is `false`.
+- if NTS explicitly credits a DJ-mixer and that artist is safely resolved, the DJ-mixer becomes the proposed release/release-group artist credit;
+- if NTS has no overall credited artist for the broadcast, the proposed credit is MusicBrainz's special-purpose `Various Artists` artist (`89ad4ac3-39f7-470e-963a-56509c546377`);
+- if an explicitly credited DJ-mixer exists but cannot be safely resolved, `artist_credit` remains unresolved and `submission_ready` stays false.
+
+Resolved DJ/compiler credits are also preserved as relationships; using a DJ-mixer as release artist does not remove the DJ-mixer relationship.
+
+## Tracks
+
+Track titles and source artist names are preserved from NTS. The builder does not invent recording MBIDs. Recording/track artist resolution remains a later enrichment/submission concern.
 
 ## Safety
 
