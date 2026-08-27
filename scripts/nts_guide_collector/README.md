@@ -10,7 +10,7 @@ Coverage first, enrichment later.
 
 The v3 schema separates whether a release can be safely created from whether all optional metadata has been enriched:
 
-`NTS -> canonical inventory -> duplicate safety -> CREATABLE / BLOCKED`
+`NTS -> canonical inventory -> MusicBrainz duplicate safety -> CREATABLE / BLOCKED`
 
 Optional mixer/compiler resolution, tracklist completeness and artwork enrichment are reported independently.
 
@@ -75,7 +75,7 @@ No MusicBrainz write endpoint exists in this module. The collector never invents
 
 ## Full-archive validation
 
-The validated coverage-first run over 426 NTS Guide episodes produced:
+The validated coverage-first run performed during development over 426 NTS Guide episodes produced:
 
 - 416 `CREATABLE`
 - 10 `BLOCKED`
@@ -88,6 +88,6 @@ The validated coverage-first run over 426 NTS Guide episodes produced:
 - 15 episodes without a tracklist
 - 426/426 with cover artwork available
 
-The previous v2 classification was `15 READY / 373 REVIEW / 38 BLOCKED`; v3 therefore exposes 401 additional safely creatable releases without inventing metadata.
+The previous v2 classification was `15 READY / 373 REVIEW / 38 BLOCKED`; the validated v3 model therefore exposed 401 additional safely creatable releases without inventing metadata.
 
-The generated 426-episode inventory is a validation artifact and is intentionally not committed to the repository.
+The generated 426-episode inventory is a validation artifact and is intentionally not committed to the repository. Regenerate it locally when fresh validation is needed.
