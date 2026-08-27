@@ -79,7 +79,7 @@ class NTSGuideSeedTest(unittest.TestCase):
 
     def test_alias_match_resolves_canonical_artist(self):
         hit = {"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "name": "石野卓球", "score": 100, "aliases": [{"name": "Takkyu Ishino"}]}
-        with patch.object(seed, "_mb_search", return_value=[hit]):
+        with patch.object(seed, "_mb_search", return_value=[hit]), patch.object(seed, "_mb_artist", return_value=hit):
             result = seed.resolve_track_artist("Takkyu Ishino", "Feeling")
         self.assertEqual(result["status"], "resolved")
         self.assertEqual(result["name"], "石野卓球")
@@ -89,7 +89,7 @@ class NTSGuideSeedTest(unittest.TestCase):
         hit = {"id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "name": "Susumu Yokota", "score": 100, "aliases": [{"name": "Ringo"}]}
         def fake_search(entity, query, limit=10, progress=False):
             return [hit] if entity == "artist" and ("Ringo" in query or "Susumu Yokota" in query) else []
-        with patch.object(seed, "_mb_search", side_effect=fake_search):
+        with patch.object(seed, "_mb_search", side_effect=fake_search), patch.object(seed, "_mb_artist", return_value=hit):
             result = seed.resolve_track_artist("Ringo Aka Susumu Yokota", "Tsukushi (1995)")
         self.assertEqual(result["status"], "resolved")
         self.assertEqual(result["mbid"], hit["id"])
