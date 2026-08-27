@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -21,6 +22,20 @@ MB_WS = "https://musicbrainz.org/ws/2"
 UA = "musicbrainz-userscripts-cli/nts-guide-collector (https://github.com/kubrick06010/musicbrainz-userscripts-cli)"
 NTS_LABEL_MBID = "2528f939-28ca-4da6-86c9-c6aab7bc4bc2"
 TRANSIENT_HTTP = {429, 500, 502, 503, 504}
+
+
+def _progress(enabled: bool, message: str) -> None:
+    if enabled:
+        print(message, file=sys.stderr, flush=True)
+
+
+def _fmt_duration(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def load_mb_access_token(path: str) -> str | None:
@@ -37,7 +52,7 @@ def load_mb_access_token(path: str) -> str | None:
     return access_token.strip()
 
 
-def get_json(url: str, accept: str = "application/json", bearer_token: str | None = None) -> Any:
+def get_json(url: str, accept: str = "application/json", bearer_token: str | None = None, progress: bool = False) -> Any:
     headers = {"User-Agent": UA, "Accept": accept}
     if bearer_token and url.startswith(MB_WS):
         headers["Authorization"] = f"Bearer {bearer_token}"
@@ -51,6 +66,7 @@ def get_json(url: str, accept: str = "application/json", bearer_token: str | Non
                 raise
             retry_after = exc.headers.get("Retry-After")
             delay = float(retry_after) if retry_after and retry_after.isdigit() else 2 ** attempt
+            _progress(progress, f"[MB] HTTP {exc.code} — retry {attempt + 2}/4 in {min(delay, 30):g}s")
             time.sleep(min(delay, 30))
     raise RuntimeError("unreachable")
 
@@ -60,10 +76,7 @@ def nts_episode_url(alias: str) -> str:
 
 
 def _split_credit_names(name: str) -> list[str]:
-    """Split only plainly plural human credits; preserve ambiguous names as one value."""
     cleaned = name.strip()
-    # Restrict splitting to simple person-like text. Parentheses, slashes and featuring/of
-    # phrases are kept intact for later human review rather than guessed apart.
     if re.search(r"[()/]", cleaned) or re.search(r"\b(feat(?:uring)?|of|with|vs\.?)\b", cleaned, re.I):
         return [cleaned]
     parts = re.split(r"\s+(?:and|&)\s+", cleaned, flags=re.I)
@@ -94,10 +107,10 @@ def extract_credits(description: str) -> list[dict[str, Any]]:
     return []
 
 
-def mb_search(entity: str, query: str, bearer_token: str | None, limit: int = 5) -> dict[str, Any]:
+def mb_search(entity: str, query: str, bearer_token: str | None, limit: int = 5, progress: bool = False) -> dict[str, Any]:
     params = urllib.parse.urlencode({"query": query, "fmt": "json", "limit": limit})
     try:
-        data = get_json(f"{MB_WS}/{entity}/?{params}", bearer_token=bearer_token)
+        data = get_json(f"{MB_WS}/{entity}/?{params}", bearer_token=bearer_token, progress=progress)
     except HTTPError as exc:
         if exc.code not in TRANSIENT_HTTP:
             raise
@@ -106,18 +119,10 @@ def mb_search(entity: str, query: str, bearer_token: str | None, limit: int = 5)
     return {"lookup_status": "ok", "http_status": None, "results": data.get(entity + "s", [])}
 
 
-def resolve_artist(name: str, bearer_token: str | None) -> dict[str, Any]:
-    search = mb_search("artist", f'artist:"{name}"', bearer_token)
+def resolve_artist(name: str, bearer_token: str | None, progress: bool = False) -> dict[str, Any]:
+    search = mb_search("artist", f'artist:"{name}"', bearer_token, progress=progress)
     if search["lookup_status"] != "ok":
-        return {
-            "name": name,
-            "mbid": None,
-            "score": 0,
-            "status": "transient_error",
-            "lookup_status": search["lookup_status"],
-            "http_status": search["http_status"],
-            "candidates": [],
-        }
+        return {"name": name, "mbid": None, "score": 0, "status": "transient_error", "lookup_status": search["lookup_status"], "http_status": search["http_status"], "candidates": []}
     hits = search["results"]
     exact = [hit for hit in hits if hit.get("name", "").casefold() == name.casefold()]
     best = exact[0] if exact else (hits[0] if hits else None)
@@ -131,39 +136,23 @@ def resolve_artist(name: str, bearer_token: str | None) -> dict[str, Any]:
         "score": score,
         "status": status,
         "lookup_status": "ok",
-        "candidates": [
-            {
-                "name": hit.get("name"),
-                "mbid": hit.get("id"),
-                "score": hit.get("score"),
-                "disambiguation": hit.get("disambiguation"),
-            }
-            for hit in hits
-        ],
+        "candidates": [{"name": hit.get("name"), "mbid": hit.get("id"), "score": hit.get("score"), "disambiguation": hit.get("disambiguation")} for hit in hits],
     }
 
 
-def duplicate_search(title: str, date: str | None, bearer_token: str | None) -> dict[str, Any]:
+def duplicate_search(title: str, date: str | None, bearer_token: str | None, progress: bool = False) -> dict[str, Any]:
     query = f'release:"{title}"'
     if date:
         query += f" AND date:{date[:10]}"
-    search = mb_search("release", query, bearer_token)
+    search = mb_search("release", query, bearer_token, progress=progress)
     if search["lookup_status"] != "ok":
-        return {
-            "lookup_status": search["lookup_status"],
-            "http_status": search["http_status"],
-            "found": None,
-            "candidates": [],
-        }
+        return {"lookup_status": search["lookup_status"], "http_status": search["http_status"], "found": None, "candidates": []}
     hits = search["results"]
     return {
         "lookup_status": "ok",
         "http_status": None,
         "found": bool(hits),
-        "candidates": [
-            {"title": hit.get("title"), "mbid": hit.get("id"), "score": hit.get("score"), "date": hit.get("date")}
-            for hit in hits
-        ],
+        "candidates": [{"title": hit.get("title"), "mbid": hit.get("id"), "score": hit.get("score"), "date": hit.get("date")} for hit in hits],
     }
 
 
@@ -188,7 +177,7 @@ def episode_detail(alias: str) -> dict[str, Any]:
     return get_json(nts_episode_url(alias))
 
 
-def classify(ep: dict[str, Any], do_mb: bool, bearer_token: str | None) -> dict[str, Any]:
+def classify(ep: dict[str, Any], do_mb: bool, bearer_token: str | None, progress: bool = False) -> dict[str, Any]:
     alias = ep.get("episode_alias") or ep.get("alias")
     detail = episode_detail(alias) if alias else ep
     description = detail.get("description") or ep.get("description") or ""
@@ -201,7 +190,6 @@ def classify(ep: dict[str, Any], do_mb: bool, bearer_token: str | None) -> dict[
 
     creation_blockers: list[str] = []
     enrichment_pending: list[str] = []
-
     if not title:
         creation_blockers.append("missing_title")
     if not broadcast:
@@ -220,7 +208,7 @@ def classify(ep: dict[str, Any], do_mb: bool, bearer_token: str | None) -> dict[
                 credit_resolutions.append({**credit, "resolution": {"name": "NTS", "status": "collective", "lookup_status": "not_needed"}})
                 enrichment_pending.append("credit_is_nts_collective")
                 continue
-            resolution = resolve_artist(credit["name"], bearer_token)
+            resolution = resolve_artist(credit["name"], bearer_token, progress=progress)
             credit_resolutions.append({**credit, "resolution": resolution})
             if resolution["status"] == "transient_error":
                 enrichment_pending.append("artist_lookup_transient")
@@ -233,7 +221,7 @@ def classify(ep: dict[str, Any], do_mb: bool, bearer_token: str | None) -> dict[
 
     duplicate = None
     if do_mb and title:
-        duplicate = duplicate_search(title, broadcast, bearer_token)
+        duplicate = duplicate_search(title, broadcast, bearer_token, progress=progress)
         if duplicate["lookup_status"] != "ok":
             creation_blockers.append("duplicate_check_transient")
         elif duplicate["found"]:
@@ -296,31 +284,59 @@ def summarize(episodes: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
-def collect(slug: str, limit: int, do_mb: bool, bearer_token: str | None, max_episodes: int | None = None) -> dict[str, Any]:
-    offset = 0
-    episodes: list[dict[str, Any]] = []
-    total = None
-    while total is None or offset < total:
-        url = NTS_API.format(slug=slug) + "?" + urllib.parse.urlencode({"offset": offset, "limit": limit})
-        page = get_json(url)
-        meta = page.get("metadata", {}).get("resultset", {})
-        total = int(meta.get("count", 0))
-        batch = page.get("results", [])
-        if not batch:
-            break
-        if max_episodes is not None:
-            batch = batch[: max_episodes - len(episodes)]
-        episodes.extend(classify(ep, do_mb, bearer_token) for ep in batch)
-        offset += len(batch)
-        if max_episodes is not None and len(episodes) >= max_episodes:
-            break
+def _process_episode(ep: dict[str, Any], index: int, total: int, do_mb: bool, bearer_token: str | None, started: float, progress: bool) -> dict[str, Any]:
+    alias = ep.get("episode_alias") or ep.get("alias") or "unknown"
+    _progress(progress, f"[{index:>3}/{total}] processing {alias}")
+    result = classify(ep, do_mb, bearer_token, progress=progress)
+    elapsed = time.monotonic() - started
+    rate = elapsed / index if index else 0
+    eta = rate * (total - index)
+    readiness = result["creation_readiness"]["status"]
+    enrichment = result["enrichment"]["status"]
+    title = result["nts"]["title"] or alias
+    _progress(progress, f"[{index:>3}/{total}] {readiness:<9} | enrich {enrichment:<8} | elapsed {_fmt_duration(elapsed)} | ETA {_fmt_duration(eta)} | {title}")
+    return result
 
+
+def collect(slug: str, limit: int, do_mb: bool, bearer_token: str | None, max_episodes: int | None = None, episode_alias: str | None = None, progress: bool = True) -> dict[str, Any]:
+    started = time.monotonic()
+    episodes: list[dict[str, Any]] = []
+
+    if episode_alias:
+        _progress(progress, f"[NTS] single-episode mode: {episode_alias}")
+        episodes.append(_process_episode({"alias": episode_alias}, 1, 1, do_mb, bearer_token, started, progress))
+    else:
+        offset = 0
+        total = None
+        target_total = None
+        _progress(progress, f"[NTS] reading archive index for {slug}…")
+        while total is None or offset < total:
+            url = NTS_API.format(slug=slug) + "?" + urllib.parse.urlencode({"offset": offset, "limit": limit})
+            page = get_json(url)
+            meta = page.get("metadata", {}).get("resultset", {})
+            total = int(meta.get("count", 0))
+            if target_total is None:
+                target_total = min(total, max_episodes) if max_episodes is not None else total
+                _progress(progress, f"[NTS] discovered {total} episodes; processing {target_total}")
+            batch = page.get("results", [])
+            if not batch:
+                break
+            if max_episodes is not None:
+                batch = batch[: max_episodes - len(episodes)]
+            for ep in batch:
+                episodes.append(_process_episode(ep, len(episodes) + 1, target_total or total, do_mb, bearer_token, started, progress))
+            offset += len(batch)
+            if max_episodes is not None and len(episodes) >= max_episodes:
+                break
+
+    coverage = summarize(episodes)
+    _progress(progress, f"[DONE] {len(episodes)} episodes | CREATABLE {coverage['CREATABLE']} | BLOCKED {coverage['BLOCKED']} | elapsed {_fmt_duration(time.monotonic() - started)}")
     return {
         "schema": "nts-guide-collector/v3",
         "show_slug": slug,
         "musicbrainz_auth": "bearer" if do_mb and bearer_token else ("anonymous" if do_mb else "disabled"),
         "episode_count": len(episodes),
-        "coverage_counts": summarize(episodes),
+        "coverage_counts": coverage,
         "episodes": episodes,
     }
 
@@ -329,9 +345,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect NTS Guide episodes into a coverage-first MusicBrainz inventory")
     parser.add_argument("--show", default="the-nts-guide-to")
     parser.add_argument("--page-size", type=int, default=50)
+    parser.add_argument("--episode", help="Process one exact NTS episode alias without scanning the archive")
     parser.add_argument("--no-musicbrainz", action="store_true", help="Skip MB artist/duplicate lookups; creation readiness will remain blocked")
     parser.add_argument("--mb-token-file", default=".mb_token.json", help="OAuth token JSON used for MusicBrainz requests")
     parser.add_argument("--max-episodes", type=int, help="Stop after this many episodes (useful for a smoke test)")
+    parser.add_argument("--quiet", action="store_true", help="Suppress progress output on stderr")
     parser.add_argument("-o", "--output", default="nts-guide-inventory.json")
     args = parser.parse_args()
 
@@ -339,8 +357,10 @@ def main() -> None:
     bearer_token = load_mb_access_token(args.mb_token_file) if do_mb else None
     if args.max_episodes is not None and args.max_episodes < 1:
         parser.error("--max-episodes must be positive")
+    if args.episode and args.max_episodes is not None:
+        parser.error("--episode and --max-episodes are mutually exclusive")
 
-    inventory = collect(args.show, args.page_size, do_mb, bearer_token, args.max_episodes)
+    inventory = collect(args.show, args.page_size, do_mb, bearer_token, args.max_episodes, args.episode, not args.quiet)
     Path(args.output).write_text(json.dumps(inventory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": args.output, "episodes": inventory["episode_count"], **inventory["coverage_counts"]}, indent=2))
 
