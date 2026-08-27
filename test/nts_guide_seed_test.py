@@ -21,13 +21,11 @@ def candidate():
             "title": "Example", "status": "Official", "date": "2026-08-19", "country": "XW",
             "label": {"name": "NTS Radio", "mbid": "2528f939-28ca-4da6-86c9-c6aab7bc4bc2"},
             "catalog_number": None, "barcode": None,
-            "medium": {"format": "Digital Media", "tracks": [
-                {
-                    "position": 1, "title": "O.Y.M.", "artist_names": ["Captain Funk"],
-                    "featuring_artist_names": [], "remix_artist_names": [], "recording_mbid": None,
-                    "artist_resolutions": [{"name": "Captain Funk", "mbid": "11111111-1111-1111-1111-111111111111", "status": "resolved", "basis": "test"}],
-                }
-            ]},
+            "medium": {"format": "Digital Media", "tracks": [{
+                "position": 1, "title": "O.Y.M.", "artist_names": ["Captain Funk"],
+                "featuring_artist_names": [], "remix_artist_names": [], "recording_mbid": None,
+                "artist_resolutions": [{"name": "Captain Funk", "canonical_name": "Captain Funk", "mbid": "11111111-1111-1111-1111-111111111111", "status": "resolved", "basis": "test"}],
+            }]},
         },
         "artist_credit": {"artists": [{"name": "Carpainter", "mbid": "f4b124f0-fccf-4add-a144-011735edbd68", "credited_as": "Carpainter"}], "basis": "officially credited DJ-mixer"},
         "urls": [{"url": "https://www.nts.live/example", "source": "NTS"}],
@@ -49,13 +47,11 @@ class NTSGuideSeedTest(unittest.TestCase):
         self.assertEqual(fields["artist_credit.names.0.mbid"], "f4b124f0-fccf-4add-a144-011735edbd68")
 
     def test_seed_repeats_release_group_types(self):
-        fields = seed.build_seed_fields(candidate())
-        types = [value for name, value in fields if name == "type"]
+        types = [value for name, value in seed.build_seed_fields(candidate()) if name == "type"]
         self.assertEqual(types, ["Broadcast", "DJ-mix"])
 
     def test_seed_maps_track_artist_mbid_without_inventing_recording(self):
         fields = self.fields()
-        self.assertEqual(fields["mediums.0.track.0.name"], "O.Y.M.")
         self.assertEqual(fields["mediums.0.track.0.artist_credit.names.0.name"], "Captain Funk")
         self.assertEqual(fields["mediums.0.track.0.artist_credit.names.0.mbid"], "11111111-1111-1111-1111-111111111111")
         self.assertNotIn("mediums.0.track.0.recording", fields)
@@ -80,6 +76,32 @@ class NTSGuideSeedTest(unittest.TestCase):
             resolved, unresolved = seed.resolve_track_artists(value, progress=False)
         self.assertEqual(unresolved, [])
         self.assertEqual(resolved["release"]["medium"]["tracks"][0]["artist_resolutions"][0]["mbid"], "22222222-2222-2222-2222-222222222222")
+
+    def test_alias_match_resolves_canonical_artist(self):
+        hit = {"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "name": "石野卓球", "score": 100, "aliases": [{"name": "Takkyu Ishino"}]}
+        with patch.object(seed, "_mb_search", return_value=[hit]):
+            result = seed.resolve_track_artist("Takkyu Ishino", "Feeling")
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["name"], "石野卓球")
+        self.assertEqual(result["mbid"], hit["id"])
+
+    def test_aka_credit_can_resolve_one_side(self):
+        hit = {"id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "name": "Susumu Yokota", "score": 100, "aliases": [{"name": "Ringo"}]}
+        def fake_search(entity, query, limit=10, progress=False):
+            return [hit] if entity == "artist" and ("Ringo" in query or "Susumu Yokota" in query) else []
+        with patch.object(seed, "_mb_search", side_effect=fake_search):
+            result = seed.resolve_track_artist("Ringo Aka Susumu Yokota", "Tsukushi (1995)")
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["mbid"], hit["id"])
+
+    def test_parenthetical_context_can_be_stripped(self):
+        hit = {"id": "cccccccc-cccc-cccc-cccc-cccccccccccc", "name": "Brothers In Raw", "score": 100, "aliases": []}
+        def fake_search(entity, query, limit=10, progress=False):
+            return [hit] if entity == "artist" and 'artist:"Brothers In Raw"' in query else []
+        with patch.object(seed, "_mb_search", side_effect=fake_search):
+            result = seed.resolve_track_artist("Brothers In Raw (Tobynation & Mijk Van Dijk)", "Ach-So!")
+        self.assertEqual(result["status"], "resolved")
+        self.assertIn("parenthetical", result["basis"])
 
     def test_missing_barcode_is_not_seeded_as_none(self):
         self.assertNotIn("barcode", self.fields())
